@@ -1,79 +1,47 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.13.6
-# ---
-
-
-
-# +
+import dolfin
 import bempp_cl.api
 import numpy as np
 
-bempp_cl.api.enable_console_logging()
-# bempp_cl.api.pool.create_device_pool("AMD")
-# -
 
-# For this notebook we will use two spheres of radius 1.0, centered at the origin.
+from bempp_cl.api.external import fenics
 
-mesh = bempp_cl.api.shapes.sphere(r=1., origin=(0, 0, 0), h=0.2)
+import gmsh
 
-# +
-theta = np.pi / 4  # Incident field travelling at a 45 degree angle
-direction = np.array([np.cos(theta), np.sin(theta), 0])
-polarization = np.array([0, 0, 1.0])
+gmsh.initialize()
+gmsh.model.occ.addSphere(0, 0, 0, 1.0, tag=1)
+gmsh.model.occ.synchronize()
 
 
-def incident_field(point):
-    return polarization * np.dot(point, direction)
+# gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.1)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.3)
+gmsh.model.mesh.generate(3)
 
 
-@bempp_cl.api.real_callable
-def tangential_trace(point, n, domain_index, result):
-    value = polarization * np.dot(point, direction)
-    result[:] = np.cross(value, n)
+
+gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+gmsh.write("sphere.msh")
+gmsh.finalize()
+
+## Convert with dolfin-convert
+# !dolfin-convert sphere.msh sphere.xml
 
 
-@bempp_cl.api.real_callable
-def neumann_trace(point, n, domain_index, result):
-    value = np.cross(direction, polarization) * np.dot(point, direction)
-    result[:] = np.cross(value, n)
+
+from dolfin import Mesh, XDMFFile
+
+mesh = Mesh("sphere.xml")
+
+# mesh = dolfin.UnitCubeMesh(4, 4, 4)
 
 
-# -
+fenics_space = dolfin.FunctionSpace(mesh, 'Nedelec 1st kind H(curl)', 1)
+trace_space, trace_matrix = fenics.fenics_to_bempp_trace_data(fenics_space)
+
+# Physical parameters
+B_0 = 1.0  # Incident field magnitude
 
 
-# +
-from bempp_cl.api.operators.boundary.maxwell import single_layer,double_layer
+# Create geometry 
+grid = trace_space.grid
 
-
-div_space  = bempp_cl.api.function_space(mesh, "RWG", 0)
-curl_space = bempp_cl.api.function_space(mesh, "SNC", 0)
-
-# Next, we define the Maxwell electric field boundary operator and the identity operator. For Maxwell problems, the ``domain`` and ``range`` spaces should be div-conforming, while the ``dual_to_range`` space should be curl conforming.
-
-SL = bempp_cl.api.operators.boundary.maxwell.single_layer(div_space, div_space, curl_space)
-DL = bempp_cl.api.operators.boundary.maxwell.double_layer(div_space, div_space, curl_space)
-II = bempp_cl.api.operators.boundary.sparse.identity(div_space, div_space, curl_space)
-
-# TODO: Define operator A
-
-# -
-
-# +
-
-# The following code assembles the right-hand sides.
-
-RHS = bempp_cl.api.GridFunction(div_space, fun=tangential_trace, dual_space=curl_space)
-
-# LU Direct Solver
-
-from bempp_cl.api.linalg import lu
-
-SOL = lu(A, RHS)
-
-# -
+print(f"Grid: {grid.number_of_elements} elements")
