@@ -89,6 +89,53 @@ def double_layer(
 # ----------------------------------------------------------------------------#
 
 
+# ----------------------------------------------------------------------------#
+# BEGIN -------- Hypersingular k = 0 -----------------------------------------#
+# ----------------------------------------------------------------------------#
+
+
+def hypersingular(
+    domain,
+    range_,
+    dual_to_range,
+    parameters=None,
+    assembler="default_nonlocal",
+    device_interface=None,
+    precision=None,
+):
+    """Assemble the hypersingular boundary operator for static Maxwell.
+
+    This operator includes only the divergence-divergence term with
+    the Laplace kernel (no wavenumber weights). It corresponds to the
+    k -> 0 limit of the divergence part of the electric field operator.
+    """
+    if domain.identifier != "rwg0":
+        raise ValueError("Domain space must be an RWG type function space.")
+
+    if dual_to_range.identifier != "snc0":
+        raise ValueError("Dual to range space must be an SNC type function space.")
+
+    return _common.create_operator(
+        "maxwell_static_hypersingular_boundary",
+        domain,
+        range_,
+        dual_to_range,
+        parameters,
+        assembler,
+        [],
+        "laplace_single_layer",
+        "maxwell_hypersingular",
+        device_interface,
+        precision,
+        False,
+    )
+
+
+# ----------------------------------------------------------------------------#
+# END ---------- Hypersingular k = 0 -----------------------------------------#
+# ----------------------------------------------------------------------------#
+
+
 def electric_field(
     domain,
     range_,
