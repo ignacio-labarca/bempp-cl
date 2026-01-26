@@ -39,6 +39,24 @@ def fenics_to_bempp_trace_data(fenics_space):
         raise NotImplementedError()
 
 
+def bempp_to_fenics_trace_data(fenics_space):
+    """Return tuple (space,inverse_trace_matrix) for Bempp to FEniCS mapping."""
+    family, degree = fenics_space_info(fenics_space)
+
+    if family == "Lagrange":
+        if degree == 1:
+            raise NotImplementedError("P1 inverse trace not yet implemented")
+        else:
+            raise NotImplementedError()
+    elif family == "Nedelec 1st kind H(curl)":
+        if degree == 1:
+            return nc1_tangential_trace_inverse(fenics_space)
+        else:
+            raise NotImplementedError()
+    else:
+        raise NotImplementedError()
+
+
 def fenics_space_info(fenics_space):
     """Return tuple (family,degree) containing information about a FEniCS space."""
     element = fenics_space.ufl_element()
