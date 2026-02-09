@@ -1,0 +1,136 @@
+#include "bempp_base_types.h"
+#include "bempp_helpers.h"
+#include "bempp_spaces.h"
+#include "kernels.h"
+
+__kernel void kernel_function(
+    __global uint *testIndices, __global uint *trialIndices,
+    __global int *testNormalSigns, __global int *trialNormalSigns,
+    __global REALTYPE *testGrid, __global REALTYPE *trialGrid,
+    __global uint *testConnectivity, __global uint *trialConnectivity,
+    __global uint *testLocal2Global, __global uint *trialLocal2Global,
+    __global REALTYPE *testLocalMultipliers,
+    __global REALTYPE *trialLocalMultipliers, __constant REALTYPE *quadPoints,
+    __constant REALTYPE *quadWeights, __global REALTYPE *globalResult,
+    __global REALTYPE *kernel_parameters, int nTest, int nTrial,
+    char gridsAreDisjoint) {
+
+  size_t gid[2] = {get_global_id(0), get_global_id(1)};
+
+  if (gid[1] >= TRIAL_NUMBER_OF_ELEMENTS) return;
+
+  size_t testIndex = testIndices[gid[0]];
+  size_t trialIndex = trialIndices[gid[1]];
+
+  size_t testQuadIndex;
+  size_t trialQuadIndex;
+  size_t i;
+  size_t j;
+  size_t globalRowIndex;
+  size_t globalColIndex;
+
+  REALTYPE3 testGlobalPoint;
+  REALTYPE3 trialGlobalPoint;
+
+  REALTYPE3 testCorners[3];
+  REALTYPE3 trialCorners[3];
+
+  uint testElement[3];
+  uint trialElement[3];
+
+  uint myTestLocal2Global[3];
+  uint myTrialLocal2Global[3];
+
+  REALTYPE myTestLocalMultipliers[3];
+  REALTYPE myTrialLocalMultipliers[3];
+
+  REALTYPE3 testJac[2];
+  REALTYPE3 trialJac[2];
+
+  REALTYPE3 testNormal;
+  REALTYPE3 trialNormal;
+
+  REALTYPE2 testPoint;
+  REALTYPE2 trialPoint;
+
+  REALTYPE testIntElem;
+  REALTYPE trialIntElem;
+  REALTYPE testEdgeLength[3];
+  REALTYPE trialEdgeLength[3];
+
+  REALTYPE kernelValue;
+  REALTYPE shapeIntegral[3][3];
+  REALTYPE kernelSum;
+
+  getCorners(testGrid, testIndex, testCorners);
+  getCorners(trialGrid, trialIndex, trialCorners);
+
+  getElement(testConnectivity, testIndex, testElement);
+  getElement(trialConnectivity, trialIndex, trialElement);
+
+  getLocal2Global(testLocal2Global, testIndex, myTestLocal2Global, 3);
+  getLocal2Global(trialLocal2Global, trialIndex, myTrialLocal2Global, 3);
+
+  getLocalMultipliers(testLocalMultipliers, testIndex, myTestLocalMultipliers, 3);
+  getLocalMultipliers(trialLocalMultipliers, trialIndex, myTrialLocalMultipliers, 3);
+
+  getJacobian(testCorners, testJac);
+  getJacobian(trialCorners, trialJac);
+
+  getNormalAndIntegrationElement(testJac, &testNormal, &testIntElem);
+  getNormalAndIntegrationElement(trialJac, &trialNormal, &trialIntElem);
+
+  computeEdgeLength(testCorners, testEdgeLength);
+  computeEdgeLength(trialCorners, trialEdgeLength);
+
+  updateNormals(testIndex, testNormalSigns, &testNormal);
+  updateNormals(trialIndex, trialNormalSigns, &trialNormal);
+
+  kernelSum = M_ZERO;
+
+  for (testQuadIndex = 0; testQuadIndex < NUMBER_OF_QUAD_POINTS;
+       ++testQuadIndex) {
+    testPoint = (REALTYPE2)(quadPoints[2 * testQuadIndex],
+                            quadPoints[2 * testQuadIndex + 1]);
+    testGlobalPoint = getGlobalPoint(testCorners, &testPoint);
+
+    REALTYPE tempSum = M_ZERO;
+
+    for (trialQuadIndex = 0; trialQuadIndex < NUMBER_OF_QUAD_POINTS;
+         ++trialQuadIndex) {
+      trialPoint = (REALTYPE2)(quadPoints[2 * trialQuadIndex],
+                               quadPoints[2 * trialQuadIndex + 1]);
+      trialGlobalPoint = getGlobalPoint(trialCorners, &trialPoint);
+
+      KERNEL(novec)
+      (testGlobalPoint, trialGlobalPoint, testNormal, trialNormal,
+       kernel_parameters, &kernelValue);
+
+      tempSum += kernelValue * quadWeights[trialQuadIndex];
+    }
+
+    kernelSum += quadWeights[testQuadIndex] * tempSum;
+  }
+
+  /* Divergence of RWG basis = 2/|T|, so product = 4/(|T_test|*|T_trial|) */
+  REALTYPE divergenceProduct =
+      M_TWO * M_TWO / (testIntElem * trialIntElem);
+
+  for (i = 0; i < 3; ++i)
+    for (j = 0; j < 3; ++j)
+      shapeIntegral[i][j] = kernelSum * divergenceProduct *
+                             testEdgeLength[i] * trialEdgeLength[j] *
+                             testIntElem * trialIntElem *
+                             myTestLocalMultipliers[i] *
+                             myTrialLocalMultipliers[j];
+
+  if (!elementsAreAdjacent(testElement, trialElement, gridsAreDisjoint)) {
+    for (i = 0; i < 3; ++i)
+      for (j = 0; j < 3; ++j) {
+        globalRowIndex = myTestLocal2Global[i];
+        globalColIndex = myTrialLocal2Global[j];
+        globalResult[globalRowIndex * nTrial + globalColIndex] +=
+            shapeIntegral[i][j];
+      }
+  }
+}
