@@ -101,8 +101,6 @@ def create_evaluator(operator_descriptor, fmm_interface, domain, dual_to_range, 
     """Return an Fmm evaluator for the requested kernel."""
     if operator_descriptor.assembly_type == "default_scalar":
         return make_default_scalar(operator_descriptor, fmm_interface, domain, dual_to_range)
-    if operator_descriptor.assembly_type.split("_")[-1] == "hypersingular":
-        return make_scalar_hypersingular(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_electric_field":
         return make_maxwell_electric_field_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_magnetic_field":
@@ -113,6 +111,8 @@ def create_evaluator(operator_descriptor, fmm_interface, domain, dual_to_range, 
         return make_maxwell_static_double_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_hypersingular":
         return make_maxwell_static_hypersingular_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type.split("_")[-1] == "hypersingular":
+        return make_scalar_hypersingular(operator_descriptor, fmm_interface, domain, dual_to_range)
 
 
 def create_potential_evaluator(operator_descriptor, fmm_interface, space, parameters):
