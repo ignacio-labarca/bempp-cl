@@ -23,6 +23,9 @@ def select_cl_kernel(operator_descriptor, mode):
         "modified_helmholtz_hypersingular": "evaluate_dense_helmholtz_hypersingular_singular",
         "maxwell_electric_field": "evaluate_dense_electric_field_singular",
         "maxwell_magnetic_field": "evaluate_dense_magnetic_field_singular",
+        "maxwell_single_layer": "evaluate_dense_maxwell_single_layer_singular",
+        "maxwell_double_layer": "evaluate_dense_maxwell_double_layer_singular",
+        "maxwell_hypersingular": "evaluate_dense_maxwell_hypersingular_singular",
     }
 
     regular_assemblers = {
@@ -32,6 +35,9 @@ def select_cl_kernel(operator_descriptor, mode):
         "modified_helmholtz_hypersingular": "evaluate_dense_helmholtz_hypersingular_regular",
         "maxwell_electric_field": "evaluate_dense_electric_field_regular",
         "maxwell_magnetic_field": "evaluate_dense_magnetic_field_regular",
+        "maxwell_single_layer": "evaluate_dense_maxwell_single_layer_regular",
+        "maxwell_double_layer": "evaluate_dense_maxwell_double_layer_regular",
+        "maxwell_hypersingular": "evaluate_dense_maxwell_hypersingular_regular",
     }
 
     potential_assemblers = {

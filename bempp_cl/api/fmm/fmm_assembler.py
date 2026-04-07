@@ -19,6 +19,9 @@ def get_mode_from_operator_identifier(identifier):
     elif descriptor == "modified":
         return "modified_helmholtz"
     elif descriptor == "maxwell":
+        # Static Maxwell operators use Laplace kernel
+        if "static" in identifier:
+            return "laplace"
         return "helmholtz"
     else:
         raise ValueError("Unknown identifier string.")
@@ -98,12 +101,18 @@ def create_evaluator(operator_descriptor, fmm_interface, domain, dual_to_range, 
     """Return an Fmm evaluator for the requested kernel."""
     if operator_descriptor.assembly_type == "default_scalar":
         return make_default_scalar(operator_descriptor, fmm_interface, domain, dual_to_range)
-    if operator_descriptor.assembly_type.split("_")[-1] == "hypersingular":
-        return make_scalar_hypersingular(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_electric_field":
         return make_maxwell_electric_field_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_magnetic_field":
         return make_maxwell_magnetic_field_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_single_layer":
+        return make_maxwell_static_single_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_double_layer":
+        return make_maxwell_static_double_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_hypersingular":
+        return make_maxwell_static_hypersingular_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type.split("_")[-1] == "hypersingular":
+        return make_scalar_hypersingular(operator_descriptor, fmm_interface, domain, dual_to_range)
 
 
 def create_potential_evaluator(operator_descriptor, fmm_interface, space, parameters):
@@ -806,6 +815,101 @@ def make_maxwell_magnetic_field_potential(operator_descriptor, fmm_interface, sp
             ]
         )
         return curl_val
+
+    return evaluate
+
+
+def make_maxwell_static_single_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make a static Maxwell single layer boundary operator (Laplace kernel).
+
+    Computes: integral G(x,y) * phi_i(x) . psi_j(y) dS
+    where G is the Laplace Green's function.
+    """
+    import bempp_cl.api
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    domain_rwg_map, dual_rwg_map = compute_rwg_basis_transform(domain, order)
+    if domain != dual_to_range:
+        _, dual_rwg_map = compute_rwg_basis_transform(dual_to_range, order)
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the static single layer operator."""
+        result = _np.zeros(dual_to_range.global_dof_count, dtype=_np.float64)
+
+        for index in range(3):
+            result += dual_rwg_map[index] @ fmm_interface.evaluate(domain_rwg_map[index] @ x)[:, 0]
+
+        return result + singular_part @ x
+
+    return evaluate
+
+
+def make_maxwell_static_double_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make a static Maxwell double layer boundary operator (Laplace kernel).
+
+    Computes: integral curl G(x,y) x psi_j(y) . phi_i(x) dS
+    where G is the Laplace Green's function.
+    This is the k=0 limit of the magnetic field operator.
+    """
+    import bempp_cl.api
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    domain_rwg_map, dual_rwg_map = compute_rwg_basis_transform(domain, order)
+    if domain != dual_to_range:
+        _, dual_rwg_map = compute_rwg_basis_transform(dual_to_range, order)
+
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the static double layer operator."""
+        result = _np.zeros(dual_to_range.global_dof_count, dtype=_np.float64)
+
+        # FMM evaluate returns [value, grad_x, grad_y, grad_z] for Laplace
+        vals = [
+            fmm_interface.evaluate(domain_rwg_map[0] @ x)[:, 1:],
+            fmm_interface.evaluate(domain_rwg_map[1] @ x)[:, 1:],
+            fmm_interface.evaluate(domain_rwg_map[2] @ x)[:, 1:],
+        ]
+
+        # Compute curl of (G * rwg): curl = grad G x rwg
+        curl_val = _np.hstack(
+            [
+                (vals[2][:, 1] - vals[1][:, 2]).reshape(-1, 1),
+                (vals[0][:, 2] - vals[2][:, 0]).reshape(-1, 1),
+                (vals[1][:, 0] - vals[0][:, 1]).reshape(-1, 1),
+            ]
+        )
+
+        # Compute inner product with test functions
+        result = -(
+            dual_rwg_map[0] @ curl_val[:, 0] + dual_rwg_map[1] @ curl_val[:, 1] + dual_rwg_map[2] @ curl_val[:, 2]
+        )
+
+        return result + singular_part @ x
+
+    return evaluate
+
+
+def make_maxwell_static_hypersingular_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make a static Maxwell hypersingular boundary operator (Laplace kernel).
+
+    Computes: integral G(x,y) * div phi_i(x) * div psi_j(y) dS
+    where G is the Laplace Green's function.
+    This is the divergence-divergence term of the electric field operator.
+    """
+    import bempp_cl.api
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    domain_div_map, dual_div_map = compute_rwg_div_transform(domain, order)
+    if domain != dual_to_range:
+        _, dual_div_map = compute_rwg_div_transform(dual_to_range, order)
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the static hypersingular operator."""
+        result = dual_div_map @ fmm_interface.evaluate(domain_div_map @ x)[:, 0]
+        return result + singular_part @ x
 
     return evaluate
 
