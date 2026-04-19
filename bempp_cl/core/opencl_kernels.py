@@ -26,6 +26,7 @@ def select_cl_kernel(operator_descriptor, mode):
         "maxwell_single_layer": "evaluate_dense_maxwell_single_layer_singular",
         "maxwell_double_layer": "evaluate_dense_maxwell_double_layer_singular",
         "maxwell_hypersingular": "evaluate_dense_maxwell_hypersingular_singular",
+        "maxwell_rwg_div_p0": "evaluate_dense_maxwell_rwg_div_p0_singular",
     }
 
     regular_assemblers = {
@@ -38,6 +39,7 @@ def select_cl_kernel(operator_descriptor, mode):
         "maxwell_single_layer": "evaluate_dense_maxwell_single_layer_regular",
         "maxwell_double_layer": "evaluate_dense_maxwell_double_layer_regular",
         "maxwell_hypersingular": "evaluate_dense_maxwell_hypersingular_regular",
+        "maxwell_rwg_div_p0": "evaluate_dense_maxwell_rwg_div_p0_regular",
     }
 
     potential_assemblers = {

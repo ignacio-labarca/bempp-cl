@@ -136,6 +136,186 @@ def hypersingular(
 # ----------------------------------------------------------------------------#
 
 
+# ----------------------------------------------------------------------------#
+# BEGIN -------- RWG-div / P0 single layer k = 0 -----------------------------#
+# ----------------------------------------------------------------------------#
+
+
+def rwg_div_p0_single_layer(
+    domain,
+    range_,
+    dual_to_range,
+    parameters=None,
+    assembler="default_nonlocal",
+    device_interface=None,
+    precision=None,
+):
+    """Assemble the RWG-divergence / P0 single layer operator for static Maxwell.
+
+    Computes the bilinear form:
+        B(psi_i, phi_j) = integral integral div_Gamma(psi_i)(x) * G(x,y) * phi_j(y) dS(y) dS(x)
+
+    where psi_i are RWG test functions (accessed through the SNC dual space),
+    G is the Laplace single layer kernel, and phi_j are P0 (piecewise constant)
+    trial functions.
+
+    This operator is intended for use as a right-hand side coupling operator.
+
+    Parameters
+    ----------
+    domain : FunctionSpace
+        P0 (piecewise constant) function space (created with kind="DP", degree=0).
+    range_ : FunctionSpace
+        Range space (typically the same as domain or dual_to_range).
+    dual_to_range : FunctionSpace
+        SNC function space (created with kind="SNC", degree=0).
+    """
+    if domain.identifier != "p0_discontinuous":
+        raise ValueError("Domain space must be a P0 (piecewise constant) function space.")
+
+    if dual_to_range.identifier != "snc0":
+        raise ValueError("Dual to range space must be an SNC type function space.")
+
+    return _common.create_operator(
+        "maxwell_static_rwg_div_p0_boundary",
+        domain,
+        range_,
+        dual_to_range,
+        parameters,
+        assembler,
+        [],
+        "laplace_single_layer",
+        "maxwell_rwg_div_p0",
+        device_interface,
+        precision,
+        False,
+    )
+
+
+# ----------------------------------------------------------------------------#
+# END ---------- RWG-div / P0 single layer k = 0 -----------------------------#
+# ----------------------------------------------------------------------------#
+
+
+# ----------------------------------------------------------------------------#
+# BEGIN -------- (V [n x grad P1], n P0) k = 0 -------------------------------#
+# ----------------------------------------------------------------------------#
+
+
+def nxgrad_p1_n_p0_single_layer(
+    domain,
+    range_,
+    dual_to_range,
+    parameters=None,
+    assembler="default_nonlocal",
+    device_interface=None,
+    precision=None,
+):
+    """Assemble the (V [n x grad P1], n P0) boundary operator for static Maxwell.
+
+    Computes the bilinear form:
+        B(phi_i, psi_j) = integral integral G(x,y)
+            [n(y) x grad_Gamma phi_i(y)] . n(x) * psi_j(x) dS(y) dS(x)
+
+    where phi_i are P1 continuous trial functions, psi_j are P0 piecewise-
+    constant test functions, and G is the Laplace single layer kernel.
+
+    Parameters
+    ----------
+    domain : FunctionSpace
+        P1 continuous function space (kind="P", degree=1).
+    range_ : FunctionSpace
+        Range space.
+    dual_to_range : FunctionSpace
+        P0 discontinuous function space (kind="DP", degree=0).
+    """
+    if domain.identifier != "p1_continuous":
+        raise ValueError("Domain space must be a P1 continuous function space.")
+
+    if dual_to_range.identifier != "p0_discontinuous":
+        raise ValueError("Dual to range space must be a P0 discontinuous function space.")
+
+    return _common.create_operator(
+        "maxwell_static_nxgrad_p1_n_p0_boundary",
+        domain,
+        range_,
+        dual_to_range,
+        parameters,
+        assembler,
+        [],
+        "laplace_single_layer",
+        "maxwell_nxgrad_p1_n_p0",
+        device_interface,
+        precision,
+        False,
+    )
+
+
+# ----------------------------------------------------------------------------#
+# END ---------- (V [n x grad P1], n P0) k = 0 -------------------------------#
+# ----------------------------------------------------------------------------#
+
+
+# ----------------------------------------------------------------------------#
+# BEGIN -------- (K[RWG], n P0) k = 0 ----------------------------------------#
+# ----------------------------------------------------------------------------#
+
+
+def double_layer_n_p0(
+    domain,
+    range_,
+    dual_to_range,
+    parameters=None,
+    assembler="default_nonlocal",
+    device_interface=None,
+    precision=None,
+):
+    """Assemble the Maxwell static double layer with n·P0 test functions.
+
+    Computes the bilinear form:
+        B(u_j, psi_i) = integral integral n(x) . [grad_x G(x,y) x u_j(y)]
+                            * psi_i(x) dS(y) dS(x)
+
+    where u_j are RWG trial functions, psi_i are P0 piecewise-constant test
+    functions, and G is the Laplace single layer kernel.  This is the normal
+    trace of the static Maxwell double layer tested with P0.
+
+    Parameters
+    ----------
+    domain : FunctionSpace
+        RWG function space (kind="RWG").
+    range_ : FunctionSpace
+        Range space.
+    dual_to_range : FunctionSpace
+        P0 discontinuous function space (kind="DP", degree=0).
+    """
+    if domain.identifier != "rwg0":
+        raise ValueError("Domain space must be an RWG type function space.")
+
+    if dual_to_range.identifier != "p0_discontinuous":
+        raise ValueError("Dual to range space must be a P0 discontinuous function space.")
+
+    return _common.create_operator(
+        "maxwell_static_double_layer_n_p0_boundary",
+        domain,
+        range_,
+        dual_to_range,
+        parameters,
+        assembler,
+        [],
+        "laplace_single_layer",
+        "maxwell_double_layer_n_p0",
+        device_interface,
+        precision,
+        False,
+    )
+
+
+# ----------------------------------------------------------------------------#
+# END ---------- (K[RWG], n P0) k = 0 ----------------------------------------#
+# ----------------------------------------------------------------------------#
+
+
 def electric_field(
     domain,
     range_,

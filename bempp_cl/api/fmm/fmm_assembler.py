@@ -111,6 +111,12 @@ def create_evaluator(operator_descriptor, fmm_interface, domain, dual_to_range, 
         return make_maxwell_static_double_layer_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type == "maxwell_hypersingular":
         return make_maxwell_static_hypersingular_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_rwg_div_p0":
+        return make_maxwell_rwg_div_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_nxgrad_p1_n_p0":
+        return make_maxwell_nxgrad_p1_n_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
+    if operator_descriptor.assembly_type == "maxwell_double_layer_n_p0":
+        return make_maxwell_double_layer_n_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range)
     if operator_descriptor.assembly_type.split("_")[-1] == "hypersingular":
         return make_scalar_hypersingular(operator_descriptor, fmm_interface, domain, dual_to_range)
 
@@ -909,6 +915,220 @@ def make_maxwell_static_hypersingular_boundary(operator_descriptor, fmm_interfac
     def evaluate(x):
         """Evaluate the static hypersingular operator."""
         result = dual_div_map @ fmm_interface.evaluate(domain_div_map @ x)[:, 0]
+        return result + singular_part @ x
+
+    return evaluate
+
+
+@_numba.njit
+def compute_p0_transform_impl(grid_data, support_elements, quad_points, weights):
+    """Compute the P0 basis transformation to quadrature points."""
+    number_of_quad_points = quad_points.shape[1]
+    number_of_support_elements = len(support_elements)
+
+    data = _np.empty(number_of_quad_points * number_of_support_elements, dtype=_np.float64)
+    iind = _np.empty(number_of_quad_points * number_of_support_elements, dtype=_np.int64)
+    jind = _np.empty(number_of_quad_points * number_of_support_elements, dtype=_np.int64)
+
+    for element_index in range(number_of_support_elements):
+        element = support_elements[element_index]
+        for point_index in range(number_of_quad_points):
+            index = number_of_quad_points * element_index + point_index
+            data[index] = weights[point_index] * grid_data.integration_elements[element]
+            iind[index] = number_of_quad_points * element_index + point_index
+            jind[index] = element_index
+
+    return (data, iind, jind)
+
+
+def compute_p0_transform(space, quadrature_order):
+    """Compute the transformation matrix mapping P0 DOFs to quadrature point densities."""
+    from bempp_cl.api.integration.triangle_gauss import rule
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.linalg import aslinearoperator
+
+    grid_data = space.grid.data("double")
+    number_of_elements = space.grid.number_of_elements
+    quad_points, weights = rule(quadrature_order)
+    npoints = len(weights)
+    dof_count = space.localised_space.grid_dof_count
+
+    data, iind, jind = compute_p0_transform_impl(grid_data, space.support_elements, quad_points, weights)
+
+    return (
+        aslinearoperator(
+            coo_matrix(
+                (data, (iind, jind)),
+                shape=(npoints * number_of_elements, dof_count),
+            ).tocsr()
+        )
+        @ aslinearoperator(space.map_to_localised_space)
+        @ aslinearoperator(space.dof_transformation)
+    )
+
+
+def make_maxwell_rwg_div_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make the Maxwell RWG-div / P0 boundary operator (Laplace kernel).
+
+    Computes: integral div_Gamma(psi_i)(x) * G(x,y) * phi_j(y) dS(y) dS(x)
+    where psi_i are RWG test functions (via SNC dual space), G is the Laplace
+    Green's function, and phi_j are P0 trial functions.
+    """
+    import bempp_cl.api
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    domain_p0_map = compute_p0_transform(domain, order)
+    _, dual_div_map = compute_rwg_div_transform(dual_to_range, order)
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the RWG-div / P0 operator."""
+        result = dual_div_map @ fmm_interface.evaluate(domain_p0_map @ x)[:, 0]
+        return result + singular_part @ x
+
+    return evaluate
+
+
+@_numba.njit
+def compute_n_p0_transform_impl(grid_data, support_elements, normal_multipliers, quad_points, weights):
+    """Compute data for the n_c * P0 test-side transform.
+
+    Returns (data, iind, jind) where:
+    - iind[k] = global quadrature-point index  (row in the forward map A_c)
+    - jind[k] = local P0 DOF index             (col in the forward map A_c)
+    - data[c, k] = normal_multipliers[element] * normals[element][c] * w * |J|
+
+    A_c has shape (n_quad*n_elements, n_p0_local_dofs).  Its transpose A_c^T
+    is the backward map: FMM-potential values -> P0 DOF contributions weighted
+    by the c-th normal component.
+    """
+    number_of_quad_points = quad_points.shape[1]
+    number_of_support_elements = len(support_elements)
+
+    data = _np.empty((3, number_of_quad_points * number_of_support_elements), dtype=_np.float64)
+    iind = _np.empty(number_of_quad_points * number_of_support_elements, dtype=_np.int64)
+    jind = _np.empty(number_of_quad_points * number_of_support_elements, dtype=_np.int64)
+
+    for element_index in range(number_of_support_elements):
+        element = support_elements[element_index]
+        normal_c = normal_multipliers[element] * grid_data.normals[element]
+        for point_index in range(number_of_quad_points):
+            idx = number_of_quad_points * element_index + point_index
+            w = weights[point_index] * grid_data.integration_elements[element]
+            data[:, idx] = normal_c * w
+            iind[idx] = idx
+            jind[idx] = element_index
+
+    return data, iind, jind
+
+
+def compute_n_p0_transform(space, quadrature_order):
+    """Compute the backward test maps for the n * P0 test functional.
+
+    Returns a list of three linear operators n_p0_maps_T[c] (c = 0, 1, 2),
+    each mapping FMM potential values at test quadrature points to P0 DOFs:
+
+        d_j = sum_k  m_j * n_c(x_{j,k}) * w_k * |J_j| * V(x_{j,k})
+
+    The three components are summed by the caller to get the full
+    n(x) . V(x) contribution.
+    """
+    from bempp_cl.api.integration.triangle_gauss import rule
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.linalg import aslinearoperator
+
+    grid_data = space.grid.data("double")
+    number_of_elements = space.grid.number_of_elements
+    quad_points, weights = rule(quadrature_order)
+    npoints = len(weights)
+    dof_count = space.localised_space.grid_dof_count
+
+    data, iind, jind = compute_n_p0_transform_impl(
+        grid_data,
+        space.support_elements,
+        space.normal_multipliers,
+        quad_points,
+        weights,
+    )
+
+    n_p0_maps_T = []
+    for c in range(3):
+        # Transpose: rows = local DOFs, cols = quadrature points
+        n_p0_maps_T.append(
+            aslinearoperator(space.dof_transformation.T)
+            @ aslinearoperator(space.map_to_localised_space.T)
+            @ aslinearoperator(
+                coo_matrix(
+                    (data[c, :], (jind, iind)),
+                    shape=(dof_count, npoints * number_of_elements),
+                ).tocsr()
+            )
+        )
+
+    return n_p0_maps_T
+
+
+def make_maxwell_nxgrad_p1_n_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make the (V [n x grad P1], n P0) boundary operator (Laplace kernel).
+
+    Computes:
+        B(phi_i, psi_j) = integral integral G(x,y)
+            [n(y) x grad_Gamma phi_i(y)] . n(x) * psi_j(x) dS(y) dS(x)
+
+    where phi_i are P1 trial functions and psi_j are P0 test functions.
+    """
+    import bempp_cl.api
+    import numpy as np
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    source_curls, _ = compute_p1_curl_transformation(domain, order)
+    n_p0_maps_T = compute_n_p0_transform(dual_to_range, order)
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the (V [n x grad P1], n P0) operator."""
+        result = np.zeros(dual_to_range.global_dof_count, dtype=np.float64)
+        for c in range(3):
+            result += n_p0_maps_T[c] @ fmm_interface.evaluate(source_curls[c] @ x)[:, 0]
+        return result + singular_part @ x
+
+    return evaluate
+
+
+def make_maxwell_double_layer_n_p0_boundary(operator_descriptor, fmm_interface, domain, dual_to_range):
+    """Make the Maxwell Static Double Layer with n·P0 test (Laplace kernel).
+
+    Computes:
+        B(u_j, psi_i) = integral integral n(x) . [grad_x G(x,y) x u_j(y)]
+                            * psi_i(x) dS(y) dS(x)
+
+    where u_j are RWG trial functions and psi_i are P0 test functions.
+    """
+    import bempp_cl.api
+
+    order = bempp_cl.api.GLOBAL_PARAMETERS.quadrature.regular
+    domain_rwg_map, _ = compute_rwg_basis_transform(domain, order)
+    n_p0_maps_T = compute_n_p0_transform(dual_to_range, order)
+    singular_part = operator_descriptor.singular_part.weak_form().to_sparse()
+
+    def evaluate(x):
+        """Evaluate the double layer n·P0 operator."""
+        vals = [
+            fmm_interface.evaluate(domain_rwg_map[0] @ x)[:, 1:],
+            fmm_interface.evaluate(domain_rwg_map[1] @ x)[:, 1:],
+            fmm_interface.evaluate(domain_rwg_map[2] @ x)[:, 1:],
+        ]
+        # curl_val[c] = c-th component of (grad_x G) x u(y) at test quad points
+        curl_val = [
+            vals[2][:, 1] - vals[1][:, 2],
+            vals[0][:, 2] - vals[2][:, 0],
+            vals[1][:, 0] - vals[0][:, 1],
+        ]
+        result = -(
+            n_p0_maps_T[0] @ curl_val[0]
+            + n_p0_maps_T[1] @ curl_val[1]
+            + n_p0_maps_T[2] @ curl_val[2]
+        )
         return result + singular_part @ x
 
     return evaluate
