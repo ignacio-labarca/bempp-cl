@@ -612,7 +612,7 @@ class _Solver(object):  # pylint: disable=too-few-public-methods
             use_mkl_pardiso = True
         except:  # noqa: E722
             solver_interface = splu
-            actual_mat = mat
+            actual_mat = mat.tocsc()
 
         if mat.shape[0] == mat.shape[1]:
             # Square matrix case
