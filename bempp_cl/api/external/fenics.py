@@ -273,13 +273,17 @@ def nc1_tangential_trace(fenics_space):
 
     # return None, None
     fenics_fun = _dolfin.Function(fenics_space)
+    fenics_vec = fenics_fun.vector()
+    fenics_arr = np.zeros(fenics_dim)
+    bem_coeffs = np.zeros(space.global_dof_count)
     non_z = trace_matrix.nonzero()
     for i, j in zip(non_z[0], non_z[1]):
-        fenics_fun.vector()[:] = [1.0 if k == j else 0.0 for k in range(fenics_dim)]
-        bempp_fun = bempp_cl.api.GridFunction(
-            space,
-            coefficients=[1.0 if k == i else 0.0 for k in range(space.global_dof_count)],
-        )
+        fenics_arr[j] = 1.0
+        fenics_vec[:] = fenics_arr
+        fenics_arr[j] = 0.0
+
+        bem_coeffs[i] = 1.0
+        bempp_fun = bempp_cl.api.GridFunction(space, coefficients=bem_coeffs)
 
         v1 = v_list[dof_to_vertices_map[i][0]]
         v2 = v_list[dof_to_vertices_map[i][1]]
@@ -290,6 +294,8 @@ def nc1_tangential_trace(fenics_space):
         fenics_fun.eval_cell(fenics_values, midpoint.T[0], triangles_to_tetrahedra[face[0].index])
 
         bempp_values = bempp_fun.evaluate(face[0].index, local_coords[face[1]])
+        bem_coeffs[i] = 0.0  # reset after evaluate; GridFunction used synchronously above
+
         normal = face[0].geometry.normal
         cross = np.cross(fenics_values, normal)
         k = np.argmax(np.abs(cross))
@@ -433,13 +439,17 @@ def nc1_tangential_trace_inverse(fenics_space):
     inverse_trace_matrix = inverse_trace_matrix.tolil()
 
     fenics_fun = _dolfin.Function(fenics_space)
+    fenics_vec = fenics_fun.vector()
+    fenics_arr = np.zeros(fenics_dim)
+    bem_coeffs = np.zeros(space.global_dof_count)
     non_z = trace_matrix.nonzero()
     for i, j in zip(non_z[0], non_z[1]):
-        fenics_fun.vector()[:] = [1.0 if k == j else 0.0 for k in range(fenics_dim)]
-        bempp_fun = bempp_cl.api.GridFunction(
-            space,
-            coefficients=[1.0 if k == i else 0.0 for k in range(space.global_dof_count)],
-        )
+        fenics_arr[j] = 1.0
+        fenics_vec[:] = fenics_arr
+        fenics_arr[j] = 0.0
+
+        bem_coeffs[i] = 1.0
+        bempp_fun = bempp_cl.api.GridFunction(space, coefficients=bem_coeffs)
 
         v1 = v_list[dof_to_vertices_map[i][0]]
         v2 = v_list[dof_to_vertices_map[i][1]]
@@ -450,6 +460,8 @@ def nc1_tangential_trace_inverse(fenics_space):
         fenics_fun.eval_cell(fenics_values, midpoint.T[0], triangles_to_tetrahedra[face[0].index])
 
         bempp_values = bempp_fun.evaluate(face[0].index, local_coords[face[1]])
+        bem_coeffs[i] = 0.0  # reset after evaluate; GridFunction used synchronously above
+
         normal = face[0].geometry.normal
         cross = np.cross(fenics_values, normal)
         k = np.argmax(np.abs(cross))
